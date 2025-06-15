@@ -1,16 +1,85 @@
 # Minecraft-Optimizer
 
-A cross-platform desktop application designed to simplify and automate the process of optimizing your Minecraft game by downloading and installing performance-enhancing mods.
-This tool is built for players who want to improve their Minecraft experience without the hassle of manually searching for, downloading, and installing various optimization mods. It supports both Fabric and Forge mod loaders and ensures compatibility with your chosen Minecraft version.
-Features:
-Automated Mod Installation: Automatically finds and installs compatible optimization mods.
-Mod Loader Support: Works with both Fabric and Forge ecosystems.
-Version Compatibility: Ensures mods are compatible with your specific Minecraft version.
-User-Friendly Interface: Simple and intuitive design for easy navigation.
-Cross-Platform: Available for Windows, macOS, and Linux.
-How it Works:
-Enter your CurseForge API Key (required for mod access).
-Select your Minecraft installation directory.
-Choose your Minecraft version and preferred mod loader (Fabric or Forge).
-Click "Optimize" to automatically download and install recommended performance mods.
-Note: This project is for personal and non-commercial use. It utilizes the official CurseForge API to ensure proper attribution and support for mod authors.
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const path = require('path');
+const CurseForgeAPI = require('./curseforge-api');
+const { ModOptimizer } = require('./mod-optimizer');
+
+let mainWindow;
+let curseForgeAPI;
+let modOptimizer;
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  mainWindow.loadFile('index.html');
+}
+
+// IPC handlers
+ipcMain.handle('select-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory']
+  });
+  return result.filePaths[0];
+});
+
+ipcMain.handle('set-api-key', async (event, apiKey) => {
+  try {
+    curseForgeAPI = new CurseForgeAPI(apiKey);
+    modOptimizer = new ModOptimizer(curseForgeAPI);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-minecraft-versions', async () => {
+  try {
+    if (!curseForgeAPI) {
+      throw new Error('API key not set');
+    }
+    const versions = await curseForgeAPI.getMinecraftVersions();
+    return { success: true, data: versions };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('optimize-minecraft', async (event, { minecraftPath, gameVersion, modLoader }) => {
+  try {
+    if (!modOptimizer) {
+      throw new Error('API key not set');
+    }
+
+    const compatibleMods = await modOptimizer.findCompatibleMods(gameVersion, modLoader);
+    const downloadResults = await modOptimizer.downloadMods(compatibleMods, minecraftPath);
+    
+    return { success: true, data: downloadResults };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
